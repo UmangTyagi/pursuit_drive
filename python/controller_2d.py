@@ -21,6 +21,8 @@ class controller_2d:
         
         self.kpp = 1
         self.next_waypoint = waypoints[0]
+        self.waypoints = waypoints
+        self.max_lat_acc = 7 # m/s2
         
         self.Kp = 1
         self.Ki = 0.1
@@ -31,89 +33,163 @@ class controller_2d:
         
         self.C_rr = 1
         self.C_aero = 1
-        self.rho = 1
         self.A = 1
         self.r_eff = 1
         self.GR = 1
-    
-    def wrap_to_pi(self):
         
-        if self.rotation.yaw > np.pi:
-            self.rotation.yaw -= 2*np.pi
+        self.req_str_angle_rad = 0
+        self.long_vel_ref = 0
+        self.throttle = 0
+        self.ROC = 0
+        
+        
+    def wrap_to_pi(self, yaw):
+        '''
+        description : wraps the angle bw -pi to pi
+        input : yaw
+        output : wrapped to pi yaw
+        '''
+        if yaw > np.pi:
+            yaw -= 2*np.pi
             
-        elif self.rotation.yaw < -np.pi:
-            self.rotation.yaw += 2*np.pi
-        
+        elif yaw < -np.pi:
+            yaw += 2*np.pi
         else:
             pass
         
-        return self.rotation
+        return yaw
     
-    def calculate_rr_axle_pos(self):
+    def calculate_rr_axle_pos(self, pose, wheelbase, yaw):
+        '''
+        description : calculates rear axle position
+        input : host's current position (center), wheelbase and yaw
+        output : rear axle position
+        '''
+        rr_axle_pose_x = pose.x - wheelbase/2 * np.cos(yaw)
+        rr_axle_pose_y = pose.y - wheelbase/2 * np.sin(yaw)
+    
+        return rr_axle_pose_x, rr_axle_pose_y
+    
+    def calculate_lookahead_distance(self, rr_axle_pose_x, rr_axle_pose_y, next_waypoint):
+        '''
+        description : calculates lookahead distance
+        input : rear axle position and next waypoint
+        output : lookahead distance
+        '''
+        lookahead_dist = np.sqrt((rr_axle_pose_x - next_waypoint.x) + (rr_axle_pose_y - next_waypoint.y))
         
-        self.rr_axle_pose.x = self.pose.x - self.wheelbase/2 * np.cos(self.rotation.yaw)
-        self.rr_axle_pose.y = self.pose.y + self.wheelbase/2 * np.sin(self.rotation.yaw)
-    
-        return self.rr_axle_pose
-    
-    def calculate_lookahead_distance(self):
-        # takes the next waypoint and rear axle pos as input
-        # returns lookahead distance (distance bw host's rear axle pos and the next waypoint)
-        self.lookahead_dist = np.sqrt((self.rr_axle_pose.x - self.next_waypoint.x) + (self.rr_axle_pose.y - self.next_waypoint.y))
-        return self.lookahead_dist
+        return lookahead_dist
     
     def calculate_alpha(self, wheelbase, lookahead_dist):
-        # takes the host's wheelbase and current lookahead distance as input
-        # returns alpha
-        self.alpha = np.arccos(wheelbase / lookahead_dist)
-        return self.alpha
+        '''
+        description : calculates alpha (angle bw the host's long axis and line joining rear axle and the waypoint')
+        input : wheelbase and lookahead distance
+        output : alpha
+        '''
+        alpha = np.arccos(wheelbase / lookahead_dist)
+        
+        return alpha
     
-    def calculate_req_str_angle(self):
-        # takes host's wheelbase, alpha (angle bw host's direction and waypoint's direction, host's long vel)
-        # returns requored steering angle in radians
-        self.req_str_angle_rad = np.atan2(2*self.wheelbase*np.sin(self.alpha), self.kpp * self.long_vel)
+    def calculate_req_str_angle(self, wheelbase, alpha, kpp, long_vel):
+        '''
+        description : calculates the required steering using pure pursuit algorithm
+        input : wheelbase, alpha, kpp (coefficient pure pursuit) and long vel (actual)
+        output : 
+        '''
+        req_str_angle_rad = np.atan2(2*wheelbase*np.sin(alpha), kpp * long_vel)
+        
+        return req_str_angle_rad
+    
+    def lateral_controller(self, wrap_to_pi, calculate_rr_axle_pos, calculate_lookahead_distance, calculate_alpha, calculate_req_str_angle): 
+        '''
+        description : lateral controller (combined methods)
+        input : lateral control methods
+        output : required steering angle
+        '''
+        yaw = wrap_to_pi(self.rotation.yaw)
+        
+        rr_axle_pose_x, rr_axle_pose_y = calculate_rr_axle_pos(self.pose, self.wheelbase, yaw)
+        
+        lookahead_dist = calculate_lookahead_distance(rr_axle_pose_x, rr_axle_pose_y, self.next_waypoint)
+        
+        alpha = calculate_alpha(self.wheelbase, lookahead_dist)
+        
+        self.req_str_angle_rad = calculate_req_str_angle(self.wheelbase, alpha, self.kpp, self.long_vel)
+        
         return self.req_str_angle_rad
     
-    def lateral_controller(self):
-        # calculates the lookahead distance, alpha and req steering angle for a single cycle
-        self.rotation = self.wrap_to_pi(self)
-        
-        self.rr_axle_pose = self.calculate_rr_axle_pos(self)
-        
-        self.lookahead_dist = self.calculate_lookahead_distance(self.next_waypoint, self.rr_axle_pose)
-        
-        self.alpha = self.calculate_alpha(self.wheelbase, self.lookahead_dist)
-        
-        self.req_str_angle_rad = self.calculate_req_str_angle(self.wheelbase, self.alpha, self.long_vel)
-        
-        return self.req_str_angle_rad
     
+    def PID_controller(self, long_vel_ref, long_vel, Kp, Ki, Kd, E_k_1, e_k_1, dt):
+        '''
+        description : calculates required acceleration using a PID controller
+        input : reference long velocity, actual long velocity, PID coefficients and errors and dt
+        output : required long acceleration
+        '''
+        e_k = long_vel_ref - long_vel # velocity error
+        E_k = E_k_1 + e_k * dt # cumulative error
+        e_k_dot = (e_k - e_k_1)/dt # derivative error
+        
+        req_acc =self.Kp *e_k + self.Ki * E_k + self.Kd * e_k_dot # required acceleration
+        
+        return req_acc
     
-    def PID_controller(self):
+    def fit_circle(self, waypoints):
+        '''
+        description : fits the next 3 waypoints into a circle to find the radius of curvature
+        input : next 3 waypoints
+        output : radius of curvature
+        '''
+        x1 = waypoints[0][0]
+        y1 = waypoints[0][1]
+        y2 = waypoints[1][1]
+        x3 = waypoints[2][0]
+        y3 = waypoints[2][1]
+        x2 = waypoints[1][0]
         
-        self.e_k = self.long_vel_ref - self.long_vel # velocity error
-        self.E_k = self.E_k_1 + self.e_k * self.dt # cumulative error
-        self.e_k_dot = (self.e_k - self.e_k_1)/self.dt # derivative error
+        A = x1*(y2-y3) - y1*(x2-x3) + x2*y3 - x3*y2
+        B = (x1**2 + y1**2)*(y3-y2) + (x2**2 + y2**2)*(y1-y3) + (x3**2 + y3**2)*(y2-y1)
+        C = (x1**2 + y1**2)*(x2-x3) + (x2**2 + y2**2)*(x3-x1) + (x3**2 + y3**2)*(x1-x2)
+        D = (x1**2 + y1**2)*(x3*y2 - x2*y3) + (x2**2 + y2**2)*(x1*y3 - x3*y1) + (x3**2 + y3**2)*(x2*y1 - x1*y2)        
         
-        self.req_acc =self.Kp *self.e_k + self.Ki * self.E_k + self.Kd * self.e_k_dot # required acceleration
+        # xc = -B/(2*A)
+        # yc = -C/(2*A)
+        self.ROC = np.sqrt((B**2 + C**2 - 4*A*D)/(4*A**2))
         
-        return self.req_acc
-    
-    def calculate_long_vel_ref(self):
-        self.long_vel_ref = 2 ## add here
+        return self.ROC
+        
+    def calculate_long_vel_ref(self, max_lat_acc, ROC):
+        '''
+        description : calculates reference long velocity
+        input : max lateral acceleration and radisu of curvature
+        output : reference long vel
+        '''
+        self.long_vel_ref = np.sqrt(max_lat_acc * ROC)
         
         return self.long_vel_ref
     
-    def slave_controller(self):
+    def slave_controller(self, mass_of_vehicle, req_acc, C_rr, C_aero, A, long_vel_ref, r_eff, GR):
+        '''
+        description : slave controller of the longitudinal controller
+        input : mass of vehicle, required long acceleration, rolling resistance and aero drag coefficients, ref long vel, efective tire radius and overall gear ratio
+        output : throttle (0 to 1)
+        '''
+        g = 9.81 #m/s2
+        rho = 1
         
-        self.Ft = self.mass_of_vehicle * self.req_acc + self.C_rr * self.mass_of_vehicle * self.g + 0.5*self.rho*self.A*self.long_vel_ref**2 * self.C_aero
+        Ft = mass_of_vehicle * req_acc + C_rr * mass_of_vehicle * g + 0.5*rho*A*long_vel_ref**2 * C_aero
         
-        self.T_motor = self.Ft * self.r_eff * self.GR
+        T_motor = Ft * r_eff * GR
         
-        self.throttle = np.tanh(self.T_motor)
+        self.throttle = np.tanh(T_motor)
         
         return self.throttle
     
-    
-        
-        
+    def reset(self):
+        '''
+        description : resets the attributes
+        '''
+        self.req_str_angle_rad = 0
+        self.long_vel_ref = 0
+        self.throttle = 0
+        self.ROC = 0
+                
