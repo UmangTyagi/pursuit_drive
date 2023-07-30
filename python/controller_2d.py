@@ -76,7 +76,7 @@ class controller_2d:
         input : rear axle position and next waypoint
         output : lookahead distance
         '''
-        lookahead_dist = np.sqrt((rr_axle_pose_x - next_waypoint.x) + (rr_axle_pose_y - next_waypoint.y))
+        lookahead_dist = np.sqrt((rr_axle_pose_x - next_waypoint.x)**2 + (rr_axle_pose_y - next_waypoint.y)**2)
         
         return lookahead_dist
     
@@ -119,7 +119,7 @@ class controller_2d:
         return self.req_str_angle_rad
     
     
-    def PID_controller(self, long_vel_ref, long_vel, Kp, Ki, Kd, E_k_1, e_k_1, dt):
+    def pid_controller(self, long_vel_ref, long_vel, Kp, Ki, Kd, E_k_1, e_k_1, dt):
         '''
         description : calculates required acceleration using a PID controller
         input : reference long velocity, actual long velocity, PID coefficients and errors and dt
