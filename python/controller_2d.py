@@ -14,7 +14,7 @@ class controller_2d:
         
         self.mass_of_vehicle = 1
         self.g = 9.81
-        self.wheelbase =1
+        self.wheelbase =4
         self.pose = pose
         self.rotation = rotation
         self.long_vel = long_vel
@@ -96,11 +96,11 @@ class controller_2d:
         input : wheelbase, alpha, kpp (coefficient pure pursuit) and long vel (actual)
         output : 
         '''
-        req_str_angle_rad = np.atan2(2*wheelbase*np.sin(alpha), kpp * long_vel)
+        req_str_angle_rad = np.arctan2(2*wheelbase*np.sin(alpha), kpp * long_vel)
         
         return req_str_angle_rad
     
-    def lateral_controller(self, wrap_to_pi, calculate_rr_axle_pos, calculate_lookahead_distance, calculate_alpha, calculate_req_str_angle): 
+    def lateral_controller(self, wrap_to_pi, calculate_rr_axle_pos, calculate_lookahead_distance, calculate_alpha, calculate_req_str_angle):
         '''
         description : lateral controller (combined methods)
         input : lateral control methods
