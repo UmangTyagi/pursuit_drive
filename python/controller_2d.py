@@ -10,7 +10,7 @@ class controller_2d:
     '''
     
     
-    def __init__(self,waypoints, long_vel, pose, rotation, dt, e_k_1, E_k_1 ):
+    def __init__(self,waypoints, long_vel, pose, rotation, dt, E_k_1, e_k_1):
         
         self.mass_of_vehicle = 1
         self.g = 9.81
@@ -20,7 +20,7 @@ class controller_2d:
         self.long_vel = long_vel
         
         self.kpp = 1
-        self.next_waypoint = waypoints[0]
+        self.next_waypoint = waypoints[0].transform.location
         self.waypoints = waypoints
         self.max_lat_acc = 7 # m/s2
         
@@ -28,8 +28,6 @@ class controller_2d:
         self.Ki = 0.1
         self.Kd = 0.01
         self.dt = dt
-        self.e_k_1 = e_k_1
-        self.E_k_1 = E_k_1
         
         self.C_rr = 1
         self.C_aero = 1
@@ -42,6 +40,8 @@ class controller_2d:
         self.throttle = 0
         self.ROC = 0
         
+        self.E_k_1 = E_k_1
+        self.e_k_1 = e_k_1 
         
     def wrap_to_pi(self, yaw):
         '''
@@ -100,21 +100,21 @@ class controller_2d:
         
         return req_str_angle_rad
     
-    def lateral_controller(self, wrap_to_pi, calculate_rr_axle_pos, calculate_lookahead_distance, calculate_alpha, calculate_req_str_angle):
+    def lateral_controller(self):
         '''
         description : lateral controller (combined methods)
         input : lateral control methods
         output : required steering angle
         '''
-        yaw = wrap_to_pi(self.rotation.yaw)
+        yaw = self.wrap_to_pi(self.rotation.yaw)
         
-        rr_axle_pose_x, rr_axle_pose_y = calculate_rr_axle_pos(self.pose, self.wheelbase, yaw)
+        rr_axle_pose_x, rr_axle_pose_y = self.calculate_rr_axle_pos(self.pose, self.wheelbase, yaw)
         
-        lookahead_dist = calculate_lookahead_distance(rr_axle_pose_x, rr_axle_pose_y, self.next_waypoint)
+        lookahead_dist = self.calculate_lookahead_distance(rr_axle_pose_x, rr_axle_pose_y, self.next_waypoint)
         
-        alpha = calculate_alpha(self.wheelbase, lookahead_dist)
+        alpha = self.calculate_alpha(self.wheelbase, lookahead_dist)
         
-        self.req_str_angle_rad = calculate_req_str_angle(self.wheelbase, alpha, self.kpp, self.long_vel)
+        self.req_str_angle_rad = self.calculate_req_str_angle(self.wheelbase, alpha, self.kpp, self.long_vel)
         
         return self.req_str_angle_rad
     
@@ -128,8 +128,11 @@ class controller_2d:
         e_k = long_vel_ref - long_vel # velocity error
         E_k = E_k_1 + e_k * dt # cumulative error
         e_k_dot = (e_k - e_k_1)/dt # derivative error
-        
+
         req_acc =self.Kp *e_k + self.Ki * E_k + self.Kd * e_k_dot # required acceleration
+
+        self.e_k_1 = e_k
+        self.E_k_1 = E_k
         
         return req_acc
     
@@ -139,12 +142,12 @@ class controller_2d:
         input : next 3 waypoints
         output : radius of curvature
         '''
-        x1 = waypoints[0][0]
-        y1 = waypoints[0][1]
-        y2 = waypoints[1][1]
-        x3 = waypoints[2][0]
-        y3 = waypoints[2][1]
-        x2 = waypoints[1][0]
+        x1 = waypoints[0].transform.location.x
+        y1 = waypoints[0].transform.location.y
+        y2 = waypoints[1].transform.location.x
+        x3 = waypoints[2].transform.location.y
+        y3 = waypoints[2].transform.location.x
+        x2 = waypoints[1].transform.location.y
         
         A = x1*(y2-y3) - y1*(x2-x3) + x2*y3 - x3*y2
         B = (x1**2 + y1**2)*(y3-y2) + (x2**2 + y2**2)*(y1-y3) + (x3**2 + y3**2)*(y2-y1)
@@ -184,6 +187,29 @@ class controller_2d:
         
         return self.throttle
     
+    def longitudinal_controller(self):
+        '''
+        description : combines Master controller (PID) and Slave controller
+        input : longitudinal controller methods
+        output : throttle
+        '''
+        self.ROC = self.fit_circle(self.waypoints)
+
+        max_lat_acc = 2
+        self.long_vel_ref = self.calculate_long_vel_ref(max_lat_acc, self.ROC)
+
+        req_acc = self.pid_controller(self.long_vel_ref, self.long_vel, self.Kp, self.Ki, self.Kd, self.e_k_1, self.e_k_1, self.dt)
+
+        Crr = 1
+        C_aero = 1
+        A = 1
+        r_eff = 1
+        GR = 1
+        self.throttle = self.slave_controller(self.mass_of_vehicle, req_acc, Crr, C_aero, A, self.long_vel_ref, r_eff, GR)
+
+        return self.throttle
+
+
     def reset(self):
         '''
         description : resets the attributes
