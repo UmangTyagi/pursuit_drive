@@ -16,7 +16,9 @@ class controller_2d:
         self.g = 9.81
         self.wheelbase =4
         self.pose = pose
+        self.pose.y = -self.pose.y
         self.rotation = rotation
+        self.rotation.yaw = -np.deg2rad(self.rotation.yaw)
         self.long_vel = long_vel
         
         self.kpp = 1
@@ -43,6 +45,23 @@ class controller_2d:
         self.E_k_1 = E_k_1
         self.e_k_1 = e_k_1 
         
+    def update(self, waypoints, long_vel, pose, rotation, dt, E_k_1, e_k_1):
+        '''
+        description : updates the controller inputs
+        input : next 3 waypoints, current long vel, current pose, current rotation, dt, cumulative and last cycle velocity error
+        output : no output, just updates the parameters
+        '''
+        self.waypoints = waypoints
+        self.long_vel = long_vel
+        self.pose = pose
+        self.pose.y = -self.pose.y
+        self.rotation = rotation
+        self.rotation.yaw = -np.deg2rad(self.rotation.yaw)
+        self.rotation = rotation
+        self.dt = dt
+        self.E_k_1 = E_k_1
+        self.e_k_1 = e_k_1
+
     def wrap_to_pi(self, yaw):
         '''
         description : wraps the angle bw -pi to pi
@@ -76,7 +95,7 @@ class controller_2d:
         input : rear axle position and next waypoint
         output : lookahead distance
         '''
-        lookahead_dist = np.sqrt((rr_axle_pose_x - next_waypoint.x)**2 + (rr_axle_pose_y - next_waypoint.y)**2)
+        lookahead_dist = np.sqrt((rr_axle_pose_x - next_waypoint.x)**2 + (rr_axle_pose_y + next_waypoint.y)**2)
         
         return lookahead_dist
     
@@ -86,8 +105,8 @@ class controller_2d:
         input : wheelbase and lookahead distance
         output : alpha
         '''
-        alpha = np.arccos(wheelbase / lookahead_dist)
-        
+        alpha = np.arccos(np.clip(wheelbase / lookahead_dist, -1.0, 1.0))
+
         return alpha
     
     def calculate_req_str_angle(self, wheelbase, alpha, kpp, long_vel):
@@ -133,7 +152,7 @@ class controller_2d:
 
         self.e_k_1 = e_k
         self.E_k_1 = E_k
-        
+
         return req_acc
     
     def fit_circle(self, waypoints):
@@ -143,11 +162,11 @@ class controller_2d:
         output : radius of curvature
         '''
         x1 = waypoints[0].transform.location.x
-        y1 = waypoints[0].transform.location.y
-        y2 = waypoints[1].transform.location.x
-        x3 = waypoints[2].transform.location.y
-        y3 = waypoints[2].transform.location.x
-        x2 = waypoints[1].transform.location.y
+        y1 = -waypoints[0].transform.location.y
+        x2 = waypoints[1].transform.location.x
+        y2 = -waypoints[1].transform.location.y
+        x3 = waypoints[2].transform.location.x
+        y3 = -waypoints[2].transform.location.y
         
         A = x1*(y2-y3) - y1*(x2-x3) + x2*y3 - x3*y2
         B = (x1**2 + y1**2)*(y3-y2) + (x2**2 + y2**2)*(y1-y3) + (x3**2 + y3**2)*(y2-y1)
