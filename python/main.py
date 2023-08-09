@@ -21,10 +21,13 @@ def setup():
     try:
         client = carla.Client('localhost', 2000)  #connecting to carla server
         client.set_timeout(10.0)
+        print('Update: connected to carla server')
 
         try:
             world = client.load_world('Town07') #loading town 7
             map = world.get_map()
+            print('Update: loaded world')
+            # time.sleep(5)
 
             if world and map:
                 blueprint_library = world.get_blueprint_library()
@@ -38,17 +41,20 @@ def setup():
                 actor_transform = carla.Transform(carla.Location(x=spawn_point.x, y=spawn_point.y, z=1), carla.Rotation(pitch=0, yaw=initial_yaw, roll=0))
 
                 try:
-                    actor = world.try_spawn_actor(vehicle_bp, actor_transform)
-
+                    actor = world.spawn_actor(vehicle_bp, actor_transform)
+                    print('Update: actor spawned')
                     if actor is not None:
                         actor_location = actor.get_location()
                         actor_rotation = actor.get_transform().rotation
+                        time.sleep(5)
 
                         try:
                             spectator = world.get_spectator()
                             spectator_spawn_point = actor_location
                             spectator_transform = carla.Transform(carla.Location(x=spectator_spawn_point.x, y = spectator_spawn_point.y, z=40),carla.Rotation(pitch=-90))
                             spectator.set_transform(spectator_transform)
+                            print('Update: spectator set')
+                            time.sleep(5)
                             f_setup = True
 
                         except:
@@ -75,16 +81,30 @@ def move_spectator(last_pos):
 
     if ((abs(last_pos.x - current_pos.x) > 0) and (abs(last_pos.y - current_pos.y) > 0)):
 
-        new_spectator_transform = carla.Transform(carla.Location(x=current_pos.x, y=current_pos.y, z = 40))
+        new_spectator_transform = carla.Transform(carla.Location(x=current_pos.x, y=current_pos.y, z = 40), carla.Rotation(pitch=-90))
         spectator.set_transform(new_spectator_transform)
         time.sleep(0.5)
     
     last_pos = current_pos
 
+def get_actor_states():
+
+    current_pose = actor.get_transform().location
+    current_rotation = actor.get_transform().rotation
+    current_long_vel = actor.get_velocity().x
+
+    return current_pose,current_rotation,current_long_vel
+
+def get_waypoints(index):
+
+    upcoming_waypoints = waypoints[index:index+3]
+
+    return upcoming_waypoints
+
 def main():
 
     f_setup = setup()
-
+    # time.sleep(5)
     long_vel = 0
     pose = actor.get_transform().location
     rotation = actor.get_transform().rotation
@@ -96,8 +116,19 @@ def main():
     controller = controller_2d(next_3waypoint, long_vel, pose, rotation, dt, E_k_1, e_k_1)
 
     control = carla.VehicleControl()
-    
-    while True:
+    index=1
+    while index >=1:
+
+        pose, rotation, long_vel = get_actor_states()
+        
+        E_k_1 = controller.E_k_1
+        e_k_1 = controller.e_k_1
+
+        next_3waypoint = get_waypoints(index)
+        dt = 0.05
+
+        controller.update(next_3waypoint, long_vel, pose, rotation, dt, E_k_1, e_k_1)
+
         str_angle = controller.lateral_controller()
         throttle = controller.longitudinal_controller()
         
@@ -108,6 +139,9 @@ def main():
 
         actor.apply_control(control)
 
+        index += 1
+        move_spectator(pose)
+        print(f'scan : {index}    str')
     
 
 if '__name__' == main():
